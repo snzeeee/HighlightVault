@@ -20,7 +20,7 @@
   }
 
   function getPageKey() {
-    return location.href.replace(/#.*$/, "");
+    return "highlights_" + location.href.replace(/#.*$/, "");
   }
 
   function getContext(range) {
@@ -58,7 +58,11 @@
   }
 
   function updateBadge(count) {
-    chrome.runtime.sendMessage({ type: "updateBadge", count });
+    try {
+      chrome.runtime.sendMessage({ type: "updateBadge", count }).catch(() => {});
+    } catch {
+      // Service worker may not be active
+    }
   }
 
   // --- Tooltip ---
@@ -141,7 +145,7 @@
 
   function findTextNode(anchor) {
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-    const searchStr = anchor.before + anchor.text + anchor.after;
+    let bestMatch = null;
 
     while (walker.nextNode()) {
       const node = walker.currentNode;
@@ -149,24 +153,38 @@
       const idx = content.indexOf(anchor.text);
       if (idx === -1) continue;
 
-      // Verify context
-      const parent = node.parentNode;
-      const fullText = parent.textContent || "";
-      if (searchStr && fullText.includes(anchor.text)) {
-        // Check surrounding context
+      // Walk up ancestors to find the best context match
+      let el = node.parentNode;
+      for (let depth = 0; el && depth < 5; depth++, el = el.parentNode) {
+        const fullText = el.textContent || "";
         const fullIdx = fullText.indexOf(anchor.text);
-        const beforeMatch = anchor.before === "" || fullText.slice(Math.max(0, fullIdx - 60), fullIdx).includes(anchor.before.slice(-30));
-        if (beforeMatch) {
+        if (fullIdx === -1) continue;
+
+        // If no before context was saved, accept the first text match
+        if (!anchor.before) {
+          return { node, offset: idx, length: anchor.text.length };
+        }
+
+        // Check if the before context matches at any ancestor level
+        const slice = fullText.slice(Math.max(0, fullIdx - 80), fullIdx);
+        if (slice.includes(anchor.before.slice(-30))) {
           return { node, offset: idx, length: anchor.text.length };
         }
       }
+
+      // Keep as fallback if no context match is found
+      if (!bestMatch) {
+        bestMatch = { node, offset: idx, length: anchor.text.length };
+      }
     }
-    return null;
+
+    // Return fallback match (text found but context didn't match)
+    return bestMatch;
   }
 
   async function restoreHighlights() {
     const highlights = await loadHighlights();
-    if (!highlights.length) return;
+    if (!highlights.length) return 0;
 
     for (const h of highlights) {
       // Skip if already restored
@@ -191,6 +209,7 @@
     }
 
     updateBadge(highlights.length);
+    return highlights.length;
   }
 
   // --- Delete Button ---
@@ -285,5 +304,17 @@
 
   // --- Init ---
 
-  restoreHighlights();
+  async function init() {
+    const count = await restoreHighlights();
+    // Retry once after load if some highlights were not found
+    if (count > 0) {
+      const marks = document.querySelectorAll("mark[data-highlight-id]").length;
+      const highlights = await loadHighlights();
+      if (marks < highlights.length) {
+        window.addEventListener("load", () => restoreHighlights(), { once: true });
+      }
+    }
+  }
+
+  init();
 })();
