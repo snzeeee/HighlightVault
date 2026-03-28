@@ -230,11 +230,13 @@
 
   document.addEventListener("mouseup", (e) => {
     if (!enabled) return;
-    if (tooltip && tooltip.contains(e.target)) return;
-    if (e.target.closest && e.target.closest(".hv-tooltip")) return;
+    const target = e.target.nodeType === Node.ELEMENT_NODE ? e.target : e.target.parentElement;
+    if (!target) return;
+    if (tooltip && tooltip.contains(target)) return;
+    if (target.closest(".hv-tooltip")) return;
 
     // Check if clicked on existing highlight
-    const markEl = e.target.closest("mark[data-highlight-id]");
+    const markEl = target.closest("mark[data-highlight-id]");
     if (markEl && window.getSelection().isCollapsed) {
       showDeleteBtn(markEl);
       return;
@@ -261,10 +263,11 @@
   });
 
   document.addEventListener("mousedown", (e) => {
-    if (tooltip && !tooltip.contains(e.target)) {
+    const target = e.target.nodeType === Node.ELEMENT_NODE ? e.target : e.target.parentElement;
+    if (tooltip && (!target || !tooltip.contains(target))) {
       removeTooltip();
     }
-    if (activeDeleteBtn && !activeDeleteBtn.contains(e.target) && !e.target.closest("mark[data-highlight-id]")) {
+    if (activeDeleteBtn && (!target || (!activeDeleteBtn.contains(target) && !target.closest("mark[data-highlight-id]")))) {
       removeDeleteBtn();
     }
   });
